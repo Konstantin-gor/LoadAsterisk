@@ -60,6 +60,7 @@ token = availabilityToken(crm_dns)
 
 for item in array:
     replaceAll(item, '"external_ip"', externalIp)
+    replaceAll(item, '"sip_ip"', externalIp)
     replaceAll(item, '"internal_ip"', internalIp)
     replaceAll(item, '"sip_dns"', sip_dns)
     replaceAll(item, '"crm_dns"', crm_dns)
