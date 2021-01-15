@@ -1,0 +1,45 @@
+{
+    "sip_server": "televoip.is74.ru",
+    "td-sip-api": {
+        "host" : "0.0.0.0",
+        "port" : "9080"
+    },
+    "ari": {
+        "host":""sip_dns"",
+        "port":"8088",
+        "proto":"http",
+        "user":"ari_multicall_user",
+        "password":"tohn1fae6ooC1oh"
+    },
+    "redis": {
+        "host": "localhost",
+        "port": "6379"
+    },
+    "televoip_redis": {
+        "host": "televoip.is74.ru",
+        "port": "6379"
+    },
+    "push": {
+        "proto": "https",
+        "host": "beward-push-server.is74.ru"
+    },
+    "logger": {
+        "dir": "/var/log/voip/",
+        "level" : "debug"
+    },
+    "tdapi": {
+        "proto":  "https",
+        "host": ""crm_dns"",
+        "baseurl": "/api",
+        "buyer_id": 1,
+        "user":"SIP_SERVER",
+        "password":"QVwb3nT55p59"
+        },
+    "mysql": {
+        "host": "localhost",
+        "port": 3306,
+        "user": "kamailiorw",
+        "password": "kamailiorw",
+        "database": "kamailio"
+    }
+}

@@ -1,0 +1,17 @@
+[Unit]
+Description=Intersvyaz RTSP Proxy
+After=network.target
+StartLimitInterval=0
+
+[Service]
+Type=idle
+Environment="PATH=/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
+ExecStart=/usr/local/sbin/rtspproxy.teleplus
+
+WorkingDirectory=/usr/local/sbin           
+Restart=always
+RestartSec=1
+MemoryMax=1536M
+
+[Install]
+WantedBy=multi-user.target

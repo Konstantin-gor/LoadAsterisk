@@ -1,0 +1,31 @@
+{
+    "sip_server": ""sip_dns"",
+    "need_metricks": false,
+    "bridge_params":"mixing",
+    "ari": {
+        "host": "127.0.0.1",
+        "port": "8088",
+        "proto": "http",
+        "user": "ari_multicall_user",
+        "password": "yWyUjN2h"
+    },
+    "redis": {
+        "host": "127.0.0.1",
+        "port": "6379"
+    },
+    "televoip_redis": {
+        "host": "127.0.0.1",
+        "port": "6379"
+    },
+    "push": {
+        "host": "https://"crm_dns"/televoip/"
+    },
+    "logger": {
+        "dir": "/var/log/voip/",
+        "level": "debug"
+    },
+    "tdapi": {
+        "base_uri": "https://"crm_dns"/api",
+        "token": "TKN"
+    }
+}

@@ -1,0 +1,10 @@
+[Unit]
+Description=Install ruby target version 2.6.3
+
+[Service]
+Type=oneshot
+CPUAccounting=true
+CPUQuota=30%
+
+
+ExecStart=/bin/bash -c "source /usr/local/rvm/scripts/rvm && rvm install ruby-2.6.3"

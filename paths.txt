@@ -1,0 +1,15 @@
+asterisk/pjsip.conf
+asterisk/ari.conf
+asterisk/PJSIP/td_televox.conf
+asterisk/PJSIP/transport.conf
+kamailio/kamctlrc
+kamailio/python/ksr_route_natmanage.py
+redis/redis.back
+rtpengine/rtpengine.conf
+voip/etc/rtpengine.conf
+voip/etc/KAMAILIO_DEFINE_HOST.cfg
+voip/etc/KAMAILIO_DEFINE_HOST.py
+voip/etc/td_config.json
+voip/etc/td-sip-api.json
+voip/lib/python/TdCallsManager.py
+kamailio/kamailio.cfg

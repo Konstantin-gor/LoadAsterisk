@@ -1,0 +1,360 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+Некое нечто для работы с теледомофонами на сип серверах.
+"""
+
+import logging
+from configparser import ConfigParser
+import requests
+import pika
+import time
+import json
+from datetime import datetime
+
+CONNECT_TIMEOUT = 1
+READ_TIMEOUT = 2
+DEFAULT_TIMEOUT = (CONNECT_TIMEOUT, READ_TIMEOUT)
+
+
+class Conf(ConfigParser):
+    _cfg = {}
+
+    def get_settings(self, path, name):
+        cfg_file = '{}/{}.ini'.format(path, name)
+        self.read(cfg_file)
+        for section in self.sections():
+            self._cfg[section] = {}
+            for option in self.options(section):
+                self._cfg[section][option] = self.get(section, option)
+        return self._cfg
+
+
+class Log:
+    def __init__(self):
+        logging.getLogger("pika").setLevel(logging.WARNING)
+        self.formatter = logging.Formatter('%(asctime)s,%(msecs)05d %(levelname)s: %(message)s', '%Y-%m-%d,%H:%M:%S')
+        self.log = logging.getLogger()
+        self.log.setLevel('NOTSET')
+        self.stdout_h = logging.StreamHandler()
+        self.stdout_h.setFormatter(self.formatter)
+        self.log.addHandler(self.stdout_h)
+        self.file = None
+        self.level = None
+        self.file_h = None
+
+    def set_log_file(self, log_file, level):
+        self.file = log_file
+        self.level = level.upper()
+        self.log.setLevel(self.level)
+        self.file_h = logging.FileHandler(self.file)
+        self.file_h.setFormatter(self.formatter)
+        self.log.addHandler(self.file_h)
+        self.log.removeHandler(self.stdout_h)
+
+    def critical(self, message):
+        self.log.critical(message)
+
+    def error(self, message):
+        self.log.error(message)
+
+    def warning(self, message):
+        self.log.warning(message)
+
+    def info(self, message):
+        self.log.info(message)
+
+    def debug(self, message):
+        self.log.debug(message)
+
+
+class Push:
+    __log = Log()
+
+    def __init__(self, push_url):
+        self.__push_server = push_url
+
+    # /intercom/?mac=081699C54E52&event=0&sipaddr1=49@televoip.is74.ru:7777&uuid=ab005704-22f1-11ea-a6ce-081699c54e52
+    def multipush(self, teledomophone, uuid_hdr, flat):
+        __method = 'televoip'
+        __sip_server = "televoip.is74.ru:7777"
+        __flat = '{}@{}'.format(flat, __sip_server)
+        __data = {'mac': teledomophone, 'sipaddr1': __flat, 'uuid': uuid_hdr}
+        request = '{}/{}/'.format(self.__push_server, __method)
+        self.__log.debug('Request URL: {} and params: {}'.format(request, __data))
+        rmq = Rabbit()
+        try:
+            rmq.send("PUSH_REQUEST", {"UUID": uuid_hdr})
+
+            r = requests.get(request, timeout=DEFAULT_TIMEOUT, params=__data)
+
+            rmq.send("PUSH_RESPONS", {"UUID": uuid_hdr})
+
+            if r.status_code == 204:
+                self.__log.debug('For {} received json: {}'.format(request, r.status_code))
+                return r.status_code
+            else:
+                self.__log.error('Response with code: {},'
+                                 'message: {}, \n'
+                                 'headers: {}'.format(r.status_code, r.reason, r.headers))
+
+        except requests.exceptions.ReadTimeout as e:
+            self.__log.error('Can`t Read data from PUSH server with error: {}'.format(e))
+            rmq.send("PUSH_RESPONS", {"UUID": uuid_hdr, "PUSH_RETURN": None})
+
+        except ConnectionError as e:
+            self.__log.error('Error while connecting to PUSH server: {}'.format(e))
+
+        except Exception as e:
+            self.__log.error(e)
+
+        finally:
+            rmq.close()
+
+
+class Crm:
+    """ модуль-прослойка для работы voip с td crm API. """
+
+    __headers = {'Authorization': ''}
+    __default_error = {404: 'Not Found'}
+    __log = Log()
+    __auth_type = 'Bearer'
+    token = ''
+    live_end = None
+    live_start = None
+
+    def __init__(self, **kwargs):
+        """
+        :param kwargs:
+            api_url - базовай url апи td-crm
+            api_user - имя пользователя для API
+            api_password - пароль для API
+            api_buyer_id - ID покупателя, если не задан, будет 1
+            push_url - базовый url для пуш сервера (firebase)
+        """
+
+        self._td_api_buyer_id = kwargs.get('api_buyer_id') or 1
+        self._td_api_user = kwargs.get('api_user')
+        self._td_api_password = kwargs.get('api_password')
+        self._td_auth_payload = {'BUYER_ID': self._td_api_buyer_id,
+                                 'LOGIN': self._td_api_user,
+                                 'PASS': self._td_api_password}
+        self._td_api_url = kwargs.get('api_url')
+        self._push_url = kwargs.get('push_url')
+
+        if kwargs.get('api_token') is not None:
+            self._td_api_headers = self.__headers['Authorization'] = '{} {}'.format(self.__auth_type,
+                                                                                    kwargs.get('api_token'))
+        else:
+            self._td_api_headers = self.__get_auth_header()
+
+    def __get_auth_header(self, method='auth', auth_type=__auth_type):
+        """
+        получаем авторизационный токен
+        :param method: какой метод использовать для авторизации, в нашем случае `auth`
+        :param auth_type: тип авторизации в api, по умолчанию Bearer.
+        :return: словарь в виде заголовков авторизации для дальнейших запросов.
+        """
+        td_auth_url = '{}/{}'.format(self._td_api_url, method)
+
+        try:
+            r = requests.post(td_auth_url, data=self._td_auth_payload, timeout=DEFAULT_TIMEOUT)
+            if r.status_code == 200:
+                auth_data = r.json()
+                self.token = auth_data.get('TOKEN')
+                self.live_end = datetime.strptime(auth_data.get('ACCESS_END'), '%Y-%m-%d %H:%M:%S')
+                self.live_start = datetime.strptime(auth_data.get('ACCESS_BEGIN'), '%Y-%m-%d %H:%M:%S')
+                self.__headers['Authorization'] = '{} {}'.format(auth_type, self.token)
+                self.__log.info(
+                    'From {} was received token: {}, live_start: {}, live_end: {}'.format(td_auth_url, self.token,
+                                                                                          self.live_start,
+                                                                                          self.live_end))
+                return self.__headers
+            else:
+                self.__log.error('Response with code: {},\n'
+                                 'message: {}, \n'
+                                 'headers: {}'.format(r.status_code, r.reason, r.headers))
+        except requests.exceptions.ReadTimeout as e:
+            self.__log.error('Can`t read from td-api to get auth token with error: {}'.format(e))
+        except ConnectionError as e:
+            self.__log.error('Problem with connection to td-crm: {}'.format(e))
+        except Exception as e:
+            self.__log.error(e)
+
+    def __check_token(self):
+        try:
+            time_now = datetime.now()
+            self.__log.debug('current time {}, token expiration {}'.format(time_now, self.live_end))
+            if self.live_end is not None:
+                if time_now > self.live_end:
+                    self.__log.info('the token - {} has expired, let\'s recycle'.format(self.token))
+                    self._td_api_headers = self.__get_auth_header()
+        except Exception as e:
+            self.__log.error(e)
+
+    def __td_api_get(self, uuid_hdr, td_request):
+        """
+        Обёртка для выполнения get запросов в td-crm.
+        Тут же можно реализовать кеширование и получение данных из кеша без апи
+        :param td_request:
+        :return: json с ответом от сервера или None в случае ошибки или отсутвия данных
+        """
+        # TODO: добавить кеш данных по резолвингу в редис.
+        self.__check_token()
+        self.__log.debug('Request URL: {}'.format(td_request))
+        rmq = Rabbit()
+        try:
+            rmq.send("API_REQUEST", {"UUID": uuid_hdr})
+            r = requests.get(td_request, headers=self.__headers, timeout=DEFAULT_TIMEOUT)
+            rmq.send("API_RESPONS", {"UUID": uuid_hdr, "API_RETURN": r.json()})
+            if r.status_code == 200:
+                response = r.json()
+                self.__log.debug('For {} received json: {}'.format(td_request, response))
+                return response
+            elif r.status_code == 401:
+                self.__log.debug('Response code {}, token expired, let\'s recycle'.format(r.status_code))
+                self._td_api_headers = self.__get_auth_header()
+            else:
+                self.__log.error('Response with code: {},'
+                                 'message: {}, \n'
+                                 'headers: {}'.format(r.status_code, r.reason, r.headers))
+        except requests.exceptions.ReadTimeout as e:
+            self.__log.error('Can`t read from td-crm with error: {}'.format(e))
+            rmq.send("API_RESPONS", {"UUID": uuid_hdr, "API_RETURN": None})
+        except ConnectionError as e:
+            self.__log.error('Problem with connection to td-crm: {}'.format(e))
+        except Exception as e:
+            self.__log.error(e)
+        finally:
+            rmq.close()
+
+    def resolve_sip_account(self, teledomophone, flat, uuid_hdr='', method='sip-resolve'):
+        """
+        Получаем информацию об аккаунтах привязанных к квартире не текущем теледомофоне из td-crm
+        auth Bearer
+        GET http://td-crm.is74.ru/api/sip-resolve/<teledomophone>:<flat>
+
+        :param teledomophone: sip поле From. id вызывающего теледомофона.
+        :param flat: номер набранной на теледомофоне квартиры
+        :param uuid_hdr: уникальный заголовок вызова
+        :param method: метод вызываемый в td-crm api
+        :return: json от td-crm или или None
+        """
+        td_request = '{}/{}/{}:{}'.format(self._td_api_url, method, teledomophone, flat)
+        result = self.__td_api_get(uuid_hdr, td_request)
+        if result:
+            return result
+
+    def resolve_attached(self, teledomophone, uuid_hdr='', method='sip/{}/resolve-attached'):
+        """
+        Узнаём привязанные к калитке дома и квартиры.
+        auth Bearer
+        GET http://td-crm.is74.ru/api/sip/<teledomophone>/resolve-attached
+        :param teledomophone: sip поле From. id вызывающего теледомофона.
+        :param uuid_hdr: уникальный заголовок вызова
+        :param method: метод вызываемый в td-crm api
+        :return: json от td-crm или None
+        """
+        method = method.format(teledomophone)
+        td_request = '{}/{}'.format(self._td_api_url, method)
+        result = self.__td_api_get(uuid_hdr, td_request)
+        if result:
+            return result
+
+    def device_address(self, teledomophone, uuid_hdr='', method='device/{}/address'):
+        """
+        Получение адреса установки теледомофона
+        auth Bearer
+        GET http://td-crm.is74.ru/api/device/<teledomophone>/address
+        :param teledomophone: sip поле From. id вызывающего теледомофона.
+        :param uuid_hdr: уникальный заголовок вызова
+        :param method: метод вызываемый в td-crm api
+        :return: json от td-crm или None
+        """
+        method = method.format(teledomophone)
+        td_request = '{}/{}'.format(self._td_api_url, method)
+        result = self.__td_api_get(uuid_hdr, td_request)
+        if result:
+            return result
+
+    def get_accaunt_fias(self, fias_id, flat_id, uuid_hdr='', method='sip/fias/{}:{}'):
+        """
+        Метод возвращает список sip-аккаунтов привязанных к квартире(flat_id)
+        в доме, определённому по fias_id
+        Используется в работе с калитками при распознавании адреса и дальнейшего резолвинга
+        auth Bearer
+        GET http://td-crm.is74.ru/api/sip/fias/<fias_id>:<flat_id>
+        :param fias_id: id в ФИАС (Федеральная информационная адресная система)
+        :param flat_id: id квартиры ??? ФИАС-id или просто её номер ???
+        :param uuid_hdr: уникальный заголовок вызова
+        :param method: метод вызываемый в td-crm api
+        :return: json от td-crm или None
+        """
+        method = method.format(fias_id, flat_id)
+        td_request = '{}/{}'.format(self._td_api_url, method)
+        result = self.__td_api_get(uuid_hdr, td_request)
+        if result:
+            return result
+
+
+class Rabbit:
+    __log = Log()
+
+    def __init__(self, rmq_user='td',
+                 rmq_password='td',
+                 rmq_host='rabbitmq.service.consul',
+                 rmq_port=5672,
+                 rmq_virtual_host='eventstream'):
+        self.credentials = pika.PlainCredentials(rmq_user, rmq_password)
+        self.host = rmq_host
+        self.port = rmq_port
+        self.virt_host = rmq_virtual_host
+
+        self.__connected = False
+        try:
+            self.rmq_conn = pika.BlockingConnection(pika.ConnectionParameters(host=self.host,
+                                                                              port=self.port,
+                                                                              virtual_host=self.virt_host,
+                                                                              credentials=self.credentials))
+            self.__connected = True
+        # TODO: Отлавливать конкретную ошибку
+        except Exception as e:
+            self.__log.error('Ошибка при подлючениеи к RMQ. {}'.format(e))
+
+
+        try:
+            self.channel = self.rmq_conn.channel()
+        # TODO: Отлавливать конкретную ошибку
+        except Exception as e:
+            self.__log.error('Ошибка при создании нового канала подключения {}'.format(e))
+
+    def send(self, event_type, event_attribs):
+        """
+       Метод отправки данных в rabbitmq, с последующим складыванием в ClickHouse
+       :param event_type:
+       :param event_attribs:
+       :return:
+       """
+        if not self.__connected:
+            self.__log.error('Событие {} c данными {} , не отправлены.'.format(event_type, event_attribs))
+            return False
+
+        self.channel.queue_declare(queue='televoip')
+
+        message = {
+            "TIMESTAMP": int(time.time()),
+            "SOURCE": "syslog_televoip",
+            "TSM": int(time.time() * 1000),
+            "EVENT_TYPE": event_type,
+            "EVENT_ATTRIBS": event_attribs
+        }
+
+        self.channel.basic_publish(exchange='eventstream',
+                                   routing_key='televoip',
+                                   body=json.dumps(message))
+
+    def close(self):
+        if self.__connected:
+            if isinstance(self.rmq_conn, pika.BlockingConnection):
+                self.rmq_conn.close()

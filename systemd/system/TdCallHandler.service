@@ -1,0 +1,26 @@
+[Unit]
+Description=Preprocessing for incoming call in multicall logic
+OnFailure=onfailureLLD@%p.service
+Wants=probeLLD@%p.service asterisk.service
+PartOf=asterisk.service
+After=network-online.target asterisk.service
+
+[Install]
+WantedBy=multi-user.target
+
+[Service]
+User=root
+Group=root
+
+Type=simple
+
+ExecStart=/usr/local/voip/bin/%p
+ExecStop=/bin/echo "Stopping %p"
+
+Restart=always
+#Restart=on-failure
+RestartSec=5s
+
+#LLD monitoring hooks
+#ExecStartPost=-/usr/bin/zabbix_sender -k monitoringLLD.[%p.state] -o 1 -c /etc/zabbix/zabbix_agentd.conf
+#ExecStopPost=-/usr/bin/zabbix_sender -k monitoringLLD.[%p.state] -o 0 -c /etc/zabbix/zabbix_agentd.conf
