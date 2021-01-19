@@ -65,4 +65,4 @@ for item in array:
     replaceAll(item, '"sip_dns"', sip_dns)
     replaceAll(item, '"crm_dns"', crm_dns)
     print('Выполняем замену в файле: ' + item)
-replaceAll('voip/etc/td_config.json', 'TKN', token)
+replaceAll('./voip/etc/td_config.json', 'TKN', token)
