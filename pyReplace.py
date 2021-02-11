@@ -13,12 +13,14 @@ def itsYouIp(typeIP="", ip = getIpAdress.getIp()):
     elif(ans.lower() == 'no' or ans.lower() == 'n'):
         getIp = createAdress(typeIP + " адресс.")
         return getIp
+      
 def replaceAll(file,searchExp,replaceExp):
     for line in fileinput.input(file, inplace=1):
         if searchExp in line:
             try:line = line.replace(searchExp,replaceExp)
             except:print(f"Замена {searchExp} на {replaceExp} не удалась")
         sys.stdout.write(line)
+        
 def createAdress(text):
     while(True):
         print(f'Введите ' + text)
@@ -26,10 +28,12 @@ def createAdress(text):
         print('Вы уверены что хотите указать ' + adr + '? (YES/NO)')
         ans = input()
         if(ans.lower() == 'yes' or ans.lower() == 'y'): return adr
+        
 def fromTextToArray(path):
     with open(path) as file:
         array = [row.strip() for row in file]
         return array
+    
 def availabilityToken(crmAdress):
     while(True):
         print("Имеется токен авторизации? (Yes/no)")
@@ -55,12 +59,16 @@ def availabilityToken(crmAdress):
             print("Проверка токена не удалась")
             break
 
+           
+           
 array = fromTextToArray('paths.txt')
 externalIp = itsYouIp("ВНЕШНИЙ IP") # ip внешка
 internalIp = itsYouIp("ВНУТРЕННИЙ IP", externalIp) # внутренний ip
 sip_dns = itsYouIp("DNS (sip-dns)", externalIp)
 crm_dns = createAdress("DNS от ЦРМ (crm-dns)")
 token = availabilityToken(crm_dns)
+
+
 
 for item in array:
     replaceAll(item, '"external_ip"', externalIp)
